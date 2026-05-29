@@ -14,7 +14,7 @@ import AuthorizeAccount from './components/authorize-account'
 import AuthorizeSSO from './components/authorize-sso'
 import Chooser from './components/chooser'
 import CodeInput from './components/code-input'
-import { classifyLookupError } from './utils/error-copy'
+import { classifyLookupError, ssoErrorCopy } from './utils/error-copy'
 import { isValidUserCode } from './utils/user-code'
 
 type View
@@ -26,6 +26,7 @@ type View
     | { kind: 'error_expired' }
     | { kind: 'error_rate_limited' }
     | { kind: 'error_lookup_failed' }
+    | { kind: 'error_sso', code: string }
 
 export default function DevicePage() {
   const searchParams = useSearchParams()
@@ -33,6 +34,7 @@ export default function DevicePage() {
   const pathname = usePathname()
   const urlUserCode = (searchParams.get('user_code') || '').trim().toUpperCase()
   const ssoVerified = searchParams.get('sso_verified') === '1'
+  const ssoError = searchParams.get('sso_error') || ''
 
   const [typed, setTyped] = useState('')
   const [view, setView] = useState<View>({ kind: 'code_entry' })
@@ -80,6 +82,14 @@ export default function DevicePage() {
       setView({ kind: 'authorize_account', userCode: view.userCode }) // eslint-disable-line react/set-state-in-effect
       return
     }
+    // sso_error is a non-sensitive backend error code. Drive a stable terminal
+    // view from it and leave it in the URL — scrubbing it here (router.replace)
+    // remounts the page in the same tick and wipes the just-set state, so the
+    // error never renders. The top guard stops re-runs from clobbering it.
+    if (ssoError) {
+      setView({ kind: 'error_sso', code: ssoError }) // eslint-disable-line react/set-state-in-effect
+      return
+    }
     let consumed = false
     if (ssoVerified) {
       setView({ kind: 'authorize_sso' }) // eslint-disable-line react/set-state-in-effect
@@ -94,7 +104,7 @@ export default function DevicePage() {
     }
     if (consumed && (urlUserCode || ssoVerified))
       router.replace(pathname)
-  }, [urlUserCode, ssoVerified, account, view, router, pathname])
+  }, [urlUserCode, ssoVerified, ssoError, account, view, router, pathname])
 
   const onContinue = async () => {
     if (!isValidUserCode(typed))
@@ -261,6 +271,28 @@ export default function DevicePage() {
             }}
           >
             ← Try again
+          </Button>
+        </div>
+      )}
+
+      {view.kind === 'error_sso' && (
+        <div className="flex flex-col gap-1">
+          <div className="mb-2.5 flex h-[38px] w-[38px] items-center justify-center rounded-full bg-state-destructive-hover">
+            <span className="i-ri-close-circle-line h-[18px] w-[18px] text-util-colors-red-red-600" />
+          </div>
+          <h1 className="text-xl font-semibold text-text-primary">Single sign-on failed</h1>
+          <p className="text-sm text-text-secondary">{ssoErrorCopy(view.code)}</p>
+          <Divider className="my-3" />
+          <Button
+            variant="ghost"
+            className="w-full"
+            onClick={() => {
+              router.replace(pathname)
+              setView({ kind: 'code_entry' })
+              setErrMsg(null)
+            }}
+          >
+            ← Try a different code
           </Button>
         </div>
       )}
